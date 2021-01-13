@@ -1,0 +1,13 @@
+#!/bin/bash
+
+if [ $# -eq 0 ]; then
+    echo "No arguments supplied"
+    exit 1
+fi
+
+ass=$1
+
+cd ~/cs350-os161/os161-1.99/kern/compile/ASST${ass}
+
+bmake depend
+bmake
