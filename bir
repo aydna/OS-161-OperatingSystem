@@ -9,4 +9,9 @@ ace=$1
 
 ./build ${ace}
 ./install ${ace}
-./run ${ace}
+
+if [ $# -eq 2 ]; then
+    ./run ${ace} w
+else
+    ./run ${ace}
+fi
