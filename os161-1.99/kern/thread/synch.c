@@ -40,6 +40,7 @@
 #include <current.h>
 #include <synch.h>
 
+
 ////////////////////////////////////////////////////////////
 //
 // Semaphore.
@@ -162,7 +163,17 @@ lock_create(const char *name)
                 kfree(lock);
                 return NULL;
         }
+
+        lock->lock_wchan = wchan_create(lock->lk_name);
+	if (lock->lock_wchan == NULL) {
+		kfree(lock->lk_name);
+		kfree(lock);
+	        return NULL;
+	}
         
+        lock->held = false; // no one owns the lock yet
+        spinlock_init(&lock->spin); // initiate spinlock
+        lock->owner = NULL; // starts off with no owner
         // add stuff here as needed
         
         return lock;
@@ -172,9 +183,11 @@ void
 lock_destroy(struct lock *lock)
 {
         KASSERT(lock != NULL);
-
+        KASSERT(lock->owner == NULL);
         // add stuff here as needed
         
+        spinlock_cleanup(&lock->spin);
+	wchan_destroy(lock->lock_wchan);
         kfree(lock->lk_name);
         kfree(lock);
 }
@@ -183,26 +196,45 @@ void
 lock_acquire(struct lock *lock)
 {
         // Write this
+        KASSERT(lock != NULL);
+        KASSERT(lock_do_i_hold(lock) == false); // make sure we dont already own it
 
-        (void)lock;  // suppress warning until code gets written
+        spinlock_acquire(&lock->spin);
+        while(lock->held) {
+                wchan_lock(lock->lock_wchan);
+		spinlock_release(&lock->spin);
+                wchan_sleep(lock->lock_wchan); //wait for signal to wake up
+
+		spinlock_acquire(&lock->spin);
+        }
+
+        lock->held = true;
+        lock->owner = curthread; // current.h
+        spinlock_release(&lock->spin);
 }
 
 void
 lock_release(struct lock *lock)
 {
-        // Write this
+        KASSERT(lock != NULL);
+        KASSERT(lock_do_i_hold(lock) == true); // make sure we own this lock
 
-        (void)lock;  // suppress warning until code gets written
+        spinlock_acquire(&lock->spin);
+        lock->held = false;
+        lock->owner = NULL;
+        wchan_wakeone(lock->lock_wchan);
+        spinlock_release(&lock->spin);
 }
 
 bool
 lock_do_i_hold(struct lock *lock)
 {
-        // Write this
-
-        (void)lock;  // suppress warning until code gets written
-
-        return true; // dummy until code gets written
+        if (lock->owner == curthread) {
+                return true; // we're currently holding this lock
+        }
+        else {
+                return false; // not holding lock
+        }
 }
 
 ////////////////////////////////////////////////////////////
@@ -226,7 +258,12 @@ cv_create(const char *name)
                 return NULL;
         }
         
-        // add stuff here as needed
+        cv->cv_wchan = wchan_create(cv->cv_name);
+	if (cv->cv_wchan == NULL) {
+		kfree(cv->cv_name);
+	        return NULL;
+	}
+        
         
         return cv;
 }
@@ -238,6 +275,7 @@ cv_destroy(struct cv *cv)
 
         // add stuff here as needed
         
+        kfree(cv->cv_wchan);
         kfree(cv->cv_name);
         kfree(cv);
 }
@@ -245,23 +283,31 @@ cv_destroy(struct cv *cv)
 void
 cv_wait(struct cv *cv, struct lock *lock)
 {
-        // Write this
-        (void)cv;    // suppress warning until code gets written
-        (void)lock;  // suppress warning until code gets written
+        //Assertions 
+        KASSERT(lock_do_i_hold(lock) == true); //make sure we own it
+
+        wchan_lock(cv->cv_wchan);
+        lock_release(lock);
+        wchan_sleep(cv->cv_wchan);
+        lock_acquire(lock);
+
 }
 
 void
 cv_signal(struct cv *cv, struct lock *lock)
 {
-        // Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+        // make sure we own this lock?
+        KASSERT(cv != NULL);
+
+        wchan_wakeone(cv->cv_wchan); // wake one on the channel, fifo
+        (void)lock;
 }
 
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
-{
-	// Write this
-	(void)cv;    // suppress warning until code gets written
-	(void)lock;  // suppress warning until code gets written
+{       
+        KASSERT(cv != NULL);
+        
+        wchan_wakeall(cv->cv_wchan);
+        (void)lock;
 }
