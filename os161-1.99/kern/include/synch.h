@@ -77,7 +77,7 @@ struct lock {
         volatile bool held; // whether the locks is currently being held
         struct wchan *lock_wchan; // our wait channel
 	struct spinlock spin; // our spinlock
-        struct thread *owner; // the thread currently owning the lock
+        volatile struct thread *owner; // the thread currently owning the lock
         
         // (don't forget to mark things volatile as needed)
 };
