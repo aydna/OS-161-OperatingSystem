@@ -7,8 +7,11 @@
 #include <current.h>
 #include <proc.h>
 #include <thread.h>
+#include <synch.h>
 #include <addrspace.h>
 #include <copyinout.h>
+#include "opt-A2.h" 
+#include <mips/trapframe.h>
 
   /* this implementation of sys__exit does not do anything with the exit code */
   /* this needs to be fixed to get exit() and waitpid() working properly */
@@ -55,8 +58,8 @@ sys_getpid(pid_t *retval)
 {
   /* for now, this is just a stub that always returns a PID of 1 */
   /* you need to fix this to make it work properly */
-  *retval = 1;
-  return(0);
+  *retval = curproc->pid;
+  return 0;
 }
 
 /* stub handler for waitpid() system call                */
@@ -92,3 +95,55 @@ sys_waitpid(pid_t pid,
   return(0);
 }
 
+#if OPT_A2
+
+pid_t sys_fork(pid_t *retval, struct trapframe *tf) {
+  
+  // create new process structure for child process
+  struct proc* childProc = proc_create_runprogram("child1"); // what do I name this??
+  if (childProc == NULL) { //NULL case
+    //panic("childProc is NULL");
+    return 1;
+  }
+
+  // create and copy address space and data from parent to child
+  spinlock_acquire(&childProc->p_lock);
+  int errorCode = as_copy(curproc_getas(), &(childProc->p_addrspace));
+  spinlock_release(&childProc->p_lock);
+  if (errorCode != 0) {
+    //panic("Invalid Address Space"); // as_copy errored out
+    return 1;
+  }
+
+  // add new child to curproc's children array
+  spinlock_acquire(&childProc->p_lock);
+  array_add(curproc->children, childProc, NULL); // add current child to current process children array
+  childProc->parent = curproc; // pointer to sole parent process
+  spinlock_release(&childProc->p_lock);
+
+  // create a thread for the child process
+  spinlock_acquire(&childProc->p_lock);
+  struct trapframe *child_tf = kmalloc(sizeof(struct trapframe)); //??
+  memcpy(child_tf, tf, sizeof(struct trapframe)); //deep copy
+  spinlock_release(&childProc->p_lock);
+  if (child_tf == NULL) {
+    //panic("Can't allocate space for child trapframe");
+    return 1;
+  }
+  
+  //spinlock_acquire(&childProc->p_lock);
+  errorCode = thread_fork("childProcThread", childProc, (void*)enter_forked_process, (void*)child_tf, 0); // what's the number for
+  if (errorCode != 0) {
+    return 1; // failed thread_fork
+  }
+  
+
+  *retval = childProc->pid; // return value? idk
+
+  //spinlock_release(&childProc->p_lock); 
+
+  return 0; // success
+
+}
+
+#endif /* OPT_A2 */

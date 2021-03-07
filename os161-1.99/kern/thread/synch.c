@@ -197,7 +197,7 @@ lock_acquire(struct lock *lock)
 {
         // Write this
         KASSERT(lock != NULL);
-        KASSERT(lock_do_i_hold(lock) == false); // make sure we dont already own it
+        //KASSERT(lock_do_i_hold(lock) == false); // make sure we dont already own it
 
         spinlock_acquire(&lock->spin);
         while(lock->held) {

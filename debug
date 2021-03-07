@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [ $# -eq 0 ]; then
+    echo "No arguments supplied"
+    exit 1
+fi
+
+ass=$1
+
+cd ~/cs350-os161/root
+cs350-gdb -tui  kernel-ASST${ass} -ex "dir ~/cs350-os161//os161-1.99/kern/compile/ASST${ass}" -ex "target remote unix:.sockets/gdb"
+#-ex "cd ~/cs350-os161/os161-1.99/kern/syscall" -ex "b sys_fork"
