@@ -22,7 +22,53 @@ void sys__exit(int exitcode) {
   struct proc *p = curproc;
   /* for now, just include this to keep the compiler from complaining about
      an unused variable */
-  (void)exitcode;
+  //(void)exitcode;
+
+  #if OPT_A2
+
+  // if parent of curproc is still alive. we need to keep curproc info but also kill it (become zombie)
+
+  lock_acquire(p->myLock); // due to making changes to children
+  struct proc* currChild = NULL; // current child being iterated on
+
+  // in any case we also need to check if we have any zombie children (and fully delete those too)
+  unsigned int num = array_num(p->children);
+  for (unsigned int i = 0; i < num; i++) {
+    currChild = array_get(p->children, i);
+    if (currChild == NULL) {
+      continue;
+    }
+    lock_acquire(currChild->myLock);
+    if (!currChild->isAlive) {
+      lock_release(currChild->myLock);
+      proc_destroy(currChild); // destroy the zombie child
+    }
+    else {
+      currChild->parent = NULL; // inform living kid that he's gonna be an orphan
+      lock_release(currChild->myLock);
+    }
+    //lock_release(currChild->myLock);
+  }
+
+  // we can kill ourselves in this case
+  //if (curproc->parent == NULL || !curproc->parent->isAlive) {
+    // we suicide. no living parent. no need to live the lines after this will run proc_destroy on curproc
+  // parent is alive. we become zombie
+  p->isAlive = false; // become zombie. info still kept tho. not destroyed
+  if (p->parent != NULL){
+    p->exitCode = exitcode; // Success
+    cv_signal(p->myCv, p->myLock); // wake any waiting processes
+  }
+  lock_release(p->myLock);
+  /*
+  else {
+    lock_release(p-myLock);
+    proc_destroy(p); // NULL Case. dead parent
+  } */
+  // if they aren't alive then you can just off yourself completely (fully delete urself)
+  // the code below will call proc_destroy on curproc
+  
+  #endif
 
   DEBUG(DB_SYSCALL,"Syscall: _exit(%d)\n",exitcode);
 
@@ -42,10 +88,16 @@ void sys__exit(int exitcode) {
   /* note: curproc cannot be used after this call */
   proc_remthread(curthread);
 
+  #if OPT_A2
+  if (p->parent == NULL) { // parent is dead
+    proc_destroy(p); // completely destroy myself
+  }
+  #else
   /* if this is the last user process in the system, proc_destroy()
      will wake up the kernel menu thread */
   proc_destroy(p);
-  
+  #endif
+
   thread_exit();
   /* thread_exit() does not return, so we should never get here */
   panic("return from thread_exit in sys_exit\n");
@@ -82,11 +134,47 @@ sys_waitpid(pid_t pid,
      Fix this!
   */
 
+  #if OPT_A2
+  
+  struct proc* currChild = NULL; // current child
+  // Check if the pid is of one of our children
+  // may need loop for this or smth to iterate over the array
+  lock_acquire(curproc->myLock); // Critical area
+  unsigned int num = array_num(curproc->children);
+  for (unsigned int i = 0; i < num; i++) {
+    currChild = array_get(curproc->children, i);
+    if (currChild->pid == pid) {
+      
+      // we now wait
+      lock_acquire(currChild->myLock);
+      lock_release(curproc->myLock);
+      while (currChild->isAlive) { // while the child hasn't exited yet
+        cv_wait(currChild->myCv, currChild->myLock);
+      }
+      lock_acquire(curproc->myLock);
+      lock_release(currChild->myLock);
+      exitstatus = _MKWAIT_EXIT(currChild->exitCode);
+      break; // we have found our child
+    }
+    currChild = NULL;
+  }
+  lock_release(curproc->myLock);
+
+  if (currChild == NULL) {
+    return 1; // we have not found a child of that pid
+  }
+  options = 0; // idk just to get rid of the error warning
+
+  #else
+  
   if (options != 0) {
     return(EINVAL);
   }
   /* for now, just pretend the exitstatus is 0 */
   exitstatus = 0;
+
+  #endif // A2
+
   result = copyout((void *)&exitstatus,status,sizeof(int));
   if (result) {
     return(result);
@@ -94,6 +182,8 @@ sys_waitpid(pid_t pid,
   *retval = pid;
   return(0);
 }
+
+
 
 #if OPT_A2
 

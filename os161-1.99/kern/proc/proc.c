@@ -118,6 +118,11 @@ proc_create(const char *name)
 	
 	proc->parent = NULL; // we set parent in fork
 	proc->children = array_create(); // returns pointer to array structure for children
+
+	proc->myLock = lock_create("curproc's lock");
+	proc->myCv = cv_create("curproc's cv");
+	proc->isAlive = true; // curproc is alive indeed
+	proc->exitCode = -1; // exit hasn't been called on curproc yet
 #endif
 
 	return proc;
@@ -154,7 +159,11 @@ proc_destroy(struct proc *proc)
 	}
 
 #if OPT_A2
-	//array_destroy(proc->children); // remove children
+	// destroy stuff
+	proc->isAlive = false;
+	lock_destroy(proc->myLock);
+	cv_destroy(proc->myCv);
+	//array_destroy(proc->children); // will this break smth
 #endif
 
 #ifndef UW  // in the UW version, space destruction occurs in sys_exit, not here

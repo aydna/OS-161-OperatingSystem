@@ -74,6 +74,11 @@ struct proc {
 	pid_t pid; //pid of curproc
 	struct proc* parent; // pointer to parent process of this process
 	struct array* children; // array of all this process' children *maybe volatile*
+
+	struct lock* myLock; // actual lock
+	struct cv* myCv; // condition variable
+	bool isAlive; // signals whether the current process is alive
+	int exitCode; // holds the exit code for when sys_exit is called on curproc
 #endif
 };
 
