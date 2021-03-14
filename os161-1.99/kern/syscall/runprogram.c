@@ -44,6 +44,8 @@
 #include <vfs.h>
 #include <syscall.h>
 #include <test.h>
+#include "opt-A2.h"
+#include <copyinout.h>
 
 /*
  * Load program "progname" and start running it in usermode.
@@ -51,8 +53,11 @@
  *
  * Calls vfs_open on progname and thus may destroy it.
  */
-int
-runprogram(char *progname)
+#if OPT_A2
+int runprogram(char *progname, int numArgs, char** argsArray)
+#else
+int runprogram(char *progname)
+#endif // OPT_A2
 {
 	struct addrspace *as;
 	struct vnode *v;
@@ -76,7 +81,7 @@ runprogram(char *progname)
 	}
 
 	/* Switch to it and activate it. */
-	curproc_setas(as);
+	struct addrspace* oldAddressSpace = curproc_setas(as);
 	as_activate();
 
 	/* Load the executable. */
@@ -97,10 +102,42 @@ runprogram(char *progname)
 		return result;
 	}
 
+#if OPT_A2
+	// argument passing stuff
+
+	vaddr_t currStackPtr = USERSTACK; // top of stack initially
+  	vaddr_t* argAddresses = kmalloc((numArgs + 1) * sizeof(vaddr_t)); // array of stack addresses stored for each arg
+	
+	for (int i = numArgs - 1; i >= 0; i--) {
+		size_t currArgSize = (strlen(argsArray[i]) + 1) * sizeof(char); // chars are size 1; no need for alignment
+		currArgSize = ROUNDUP(currArgSize, 4); // do we need this to enforce?
+		currStackPtr -= currArgSize; // update the stack ptr
+		argAddresses[i] = currStackPtr;
+		copyoutstr((const char*)argsArray[i], (userptr_t)currStackPtr, currArgSize, NULL); // write curr arg string onto stack
+  	}
+  	// take care of null terminate
+  	argAddresses[numArgs] = (vaddr_t)NULL;
+
+	// take care of the pointers array now
+  	//currStackPtr = ROUNDUP(currStackPtr, 4) - 4; // to ensure that it is currently 8 aligned for ptrs
+  	const size_t ptrSize = sizeof(vaddr_t); // 4 bits
+  	for (int i = numArgs; i >= 0 ; i--) {
+    	currStackPtr -= ptrSize;
+    	copyout((void*)&argAddresses[i], (userptr_t)currStackPtr, ptrSize); // write ptr addr of arg i onto stack
+  	}
+	
+	as_destroy(oldAddressSpace);
+  
+  	enter_new_process(numArgs, (userptr_t)currStackPtr, currStackPtr, entrypoint);
+
+#else
+
 	/* Warp to user mode. */
 	enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
 			  stackptr, entrypoint);
-	
+
+#endif // OPT_A2
+
 	/* enter_new_process does not return. */
 	panic("enter_new_process returned\n");
 	return EINVAL;

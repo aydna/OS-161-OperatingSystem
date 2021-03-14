@@ -12,6 +12,8 @@
 #include <copyinout.h>
 #include "opt-A2.h" 
 #include <mips/trapframe.h>
+#include <vfs.h>
+#include <kern/fcntl.h>
 
   /* this implementation of sys__exit does not do anything with the exit code */
   /* this needs to be fixed to get exit() and waitpid() working properly */
@@ -57,9 +59,13 @@ void sys__exit(int exitcode) {
   p->isAlive = false; // become zombie. info still kept tho. not destroyed
   if (p->parent != NULL){
     p->exitCode = exitcode; // Success
+    //lock_release(p->myLock);
     cv_signal(p->myCv, p->myLock); // wake any waiting processes
   }
-  lock_release(p->myLock);
+  else {
+    //lock_release(p->myLock);
+  }
+  
   /*
   else {
     lock_release(p-myLock);
@@ -89,6 +95,7 @@ void sys__exit(int exitcode) {
   proc_remthread(curthread);
 
   #if OPT_A2
+  lock_release(p->myLock);
   if (p->parent == NULL) { // parent is dead
     proc_destroy(p); // completely destroy myself
   }
@@ -236,4 +243,122 @@ pid_t sys_fork(pid_t *retval, struct trapframe *tf) {
 
 }
 
+
+// execv syscall
+int sys_execv(const char* program, char** args) {
+
+  struct addrspace *as;
+	struct vnode *v;
+	vaddr_t entrypoint, stackptr;
+	int result;
+
+  struct addrspace *oldAddressSpace; // reference to delete it later
+  
+  // count number of args; need to use copyin here?
+  int numArgs = 0;
+  while (args[numArgs] != NULL) {
+    numArgs++;
+  }
+
+  // copy program path from user space into the kernel
+  size_t progSize= (strlen(program) + 1) * sizeof(char); 
+  char* progName = kmalloc(progSize); 
+  //programPath = program; // can i shallow copy here?
+  copyinstr((const_userptr_t)program, progName, progSize, NULL);
+  // kprintf(progName); //testing reasons
+
+  
+  // allocate memory for array and each array element string
+  char** argsArray = kmalloc((numArgs + 1) * sizeof(char*));
+  
+  // allocate 
+  for (int i = 0; i < numArgs; i++) {
+    size_t currArgSize = (strlen(args[i]) + 1) * sizeof(char); // account for null
+    argsArray[i] = kmalloc(currArgSize);
+    //argsArray[i] = currArg; // add current argument copied to args array
+    copyin((const_userptr_t)args[i], (void*)argsArray[i], currArgSize);
+  }
+  argsArray[numArgs] = NULL; // not to forget final null value
+  
+
+  // Copied From runprogram.c :
+
+                  /* Open the file. */
+                  result = vfs_open(progName, O_RDONLY, 0, &v);
+                  if (result) {
+                    return result;
+                  }
+
+                  /* We should be a new process. */
+                  //KASSERT(curproc_getas() == NULL);
+
+                  /* Create a new address space. */
+                  as = as_create();
+                  if (as ==NULL) {
+                    vfs_close(v);
+                    return ENOMEM;
+                  }
+
+                  /* Switch to it and activate it. */
+                  oldAddressSpace = curproc_setas(as); // to delete it later
+                  as_activate();
+
+                  /* Load the executable. */
+                  result = load_elf(v, &entrypoint);
+                  if (result) {
+                    /* p_addrspace will go away when curproc is destroyed */
+                    vfs_close(v);
+                    return result;
+                  }
+
+                  /* Done with the file now. */
+                  vfs_close(v);
+
+                  /* Define the user stack in the address space */
+                  result = as_define_stack(as, &stackptr);
+                  if (result) {
+                    /* p_addrspace will go away when curproc is destroyed */
+                    return result;
+                  }
+  // endof runprogram.c stuff
+  
+  // Copying arguments to user stack:
+  // 'top' variable that starts at userstack, then start subtracting from top based on strlen + null terminator
+  // then 'copyoutstr' (aka write) the string to the address top is now at (keep track of this address, will need to point to it later)
+  // repeat this process
+
+  vaddr_t currStackPtr = USERSTACK; // top of stack initially
+  vaddr_t* argAddresses = kmalloc((numArgs + 1) * sizeof(vaddr_t)); // array of stack addresses stored for each arg
+
+  for (int i = numArgs - 1; i >= 0; i--) {
+    size_t currArgSize = (strlen(argsArray[i]) + 1) * sizeof(char); // chars are size 1; no need for alignment
+    //currArgSize = ROUNDUP(currArgSize, 4); // do we need this to enforce?
+    currStackPtr -= currArgSize; // update the stack ptr
+    argAddresses[i] = currStackPtr;
+    copyoutstr((const char*)argsArray[i], (userptr_t)currStackPtr, currArgSize, NULL); // write curr arg string onto stack
+  }
+  // take care of null terminate
+  argAddresses[numArgs] = (vaddr_t)NULL;
+
+  // take care of the pointers array now
+  currStackPtr = ROUNDUP(currStackPtr, 4) - 4; // to ensure that it is currently 8 aligned for ptrs
+  const size_t ptrSize = sizeof(vaddr_t); // 4 bits
+  for (int i = numArgs; i >= 0 ; i--) {
+    currStackPtr -= ptrSize;
+    copyout((void*)&argAddresses[i], (userptr_t)currStackPtr, ptrSize); // write ptr addr of arg i onto stack
+  }
+  // maybe we need case here in case numArgs = 0, s.t. the stackptr != USERSTACK
+  
+  
+  if (currStackPtr == USERSTACK) {
+    currStackPtr -= 4; // safety precaution for no args
+  }
+  
+
+  // delete old address space
+  as_destroy(oldAddressSpace);
+  
+  enter_new_process(numArgs, (userptr_t)currStackPtr, currStackPtr, entrypoint);
+  return EINVAL; // error
+}
 #endif /* OPT_A2 */

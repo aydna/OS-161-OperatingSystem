@@ -6,11 +6,13 @@ if [ $# -eq 0 ]; then
 fi
 
 test=$1
-
-for i in {1..3}
-do
-    echo "Run:" ${i} ${test}
-    echo ${test}\n"q"\n | ./run 2 > testOut
+cd ~/cs350-os161/root
+for i in {1..100}
+do  
+    sys161 kernel-ASST${1} "p testbin/sty;q";done > ../testOut
+    #n > testOut
+    #echo "Run:" ${i} ${test}
+    #echo ${test}\n"q"\n | ./run 2 > testOut
     #echo -e ${test}"\nq"
     #echo -e ${test}"\nq" | ./run 2
 done
