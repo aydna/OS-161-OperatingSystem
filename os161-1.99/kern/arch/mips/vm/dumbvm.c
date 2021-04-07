@@ -37,6 +37,8 @@
 #include <mips/tlb.h>
 #include <addrspace.h>
 #include <vm.h>
+#include "opt-A3.h"
+#include <mips/trapframe.h>
 
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
@@ -114,6 +116,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	struct addrspace *as;
 	int spl;
 
+#if OPT_A3
+	bool isText = false; //flag for whether address is in text/code segment
+#endif
+
 	faultaddress &= PAGE_FRAME;
 
 	DEBUG(DB_VM, "dumbvm: fault: 0x%x\n", faultaddress);
@@ -121,7 +127,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	switch (faulttype) {
 	    case VM_FAULT_READONLY:
 		/* We always create pages read-write, so we can't get this */
+	#if OPT_A3
+		// dont panic and die
+		return EX_MOD; 
+	#else
 		panic("dumbvm: got VM_FAULT_READONLY\n");
+	#endif
 	    case VM_FAULT_READ:
 	    case VM_FAULT_WRITE:
 		break;
@@ -168,12 +179,18 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	stackbase = USERSTACK - DUMBVM_STACKPAGES * PAGE_SIZE;
 	stacktop = USERSTACK;
 
+	// code(text) segment 
 	if (faultaddress >= vbase1 && faultaddress < vtop1) {
 		paddr = (faultaddress - vbase1) + as->as_pbase1;
+#if OPT_A3
+		isText = true;
+#endif
 	}
+	// data segment
 	else if (faultaddress >= vbase2 && faultaddress < vtop2) {
 		paddr = (faultaddress - vbase2) + as->as_pbase2;
 	}
+	// stack
 	else if (faultaddress >= stackbase && faultaddress < stacktop) {
 		paddr = (faultaddress - stackbase) + as->as_stackpbase;
 	}
@@ -194,15 +211,39 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		}
 		ehi = faultaddress;
 		elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+
+#if OPT_A3
+		if (as->elf_finished && isText) {
+			elo &= ~TLBLO_DIRTY; // turn dirty bit off
+		}
+#endif
 		DEBUG(DB_VM, "dumbvm: 0x%x -> 0x%x\n", faultaddress, paddr);
 		tlb_write(ehi, elo, i);
 		splx(spl);
 		return 0;
 	}
 
+	// if addrspace has elf_finished=true and the address lies in code(text) segment, turn the dirty bit off
+
+
+
+#if OPT_A3
+	// 3.1 Handling a full TLB
+	ehi = faultaddress;
+	elo = paddr | TLBLO_DIRTY | TLBLO_VALID; // safety precaution re-assignments
+
+	if (as->elf_finished && isText) {
+			elo &= ~TLBLO_DIRTY; // turn dirty bit off
+	}
+
+	tlb_random(ehi, elo); // write specified entry to random TLB slot
+	splx(spl); // set prio level
+	return 0;
+#else
 	kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
 	splx(spl);
 	return EFAULT;
+#endif
 }
 
 struct addrspace *
@@ -220,6 +261,10 @@ as_create(void)
 	as->as_pbase2 = 0;
 	as->as_npages2 = 0;
 	as->as_stackpbase = 0;
+
+#if OPT_A3
+	as->elf_finished = false; // elf has not loaded yet
+#endif
 
 	return as;
 }
@@ -365,6 +410,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	new->as_npages1 = old->as_npages1;
 	new->as_vbase2 = old->as_vbase2;
 	new->as_npages2 = old->as_npages2;
+	// need to copy over elf_finished bool?
 
 	/* (Mis)use as_prepare_load to allocate some physical memory. */
 	if (as_prepare_load(new)) {
