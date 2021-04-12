@@ -294,7 +294,7 @@ int sys_execv(const char* program, char** args) {
 
                   /* Create a new address space. */
                   as = as_create();
-                  if (as ==NULL) {
+                  if (as == NULL) {
                     vfs_close(v);
                     return ENOMEM;
                   }
@@ -354,9 +354,14 @@ int sys_execv(const char* program, char** args) {
     currStackPtr -= 4; // safety precaution for no args
   }
   
-
   // delete old address space
   as_destroy(oldAddressSpace);
+
+  kfree(progName);
+  for (int i = 0; i < numArgs; i++) {
+    kfree(argsArray[i]);
+  }
+  kfree(argsArray);
   
   enter_new_process(numArgs, (userptr_t)currStackPtr, currStackPtr, entrypoint);
   return EINVAL; // error

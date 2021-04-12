@@ -53,11 +53,69 @@
  */
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
+volatile bool bootstrapDone = false; // prevent mem shenanigans -> can start using coremap instead of ram_steamlmem
+volatile int *coremap; // array storing 
+volatile paddr_t loAddr; // our beggining adr (frame 1 of coremap)
+volatile int totalPages;
+
 void
 vm_bootstrap(void)
 {
-	/* Do nothing. */
+#if OPT_A3
+
+	paddr_t hi;	// last available addr
+	paddr_t lo; // first available addr
+	ram_getsize(&lo, &hi); // load them in
+
+	coremap = (int *)PADDR_TO_KVADDR(lo);
+
+	
+	totalPages = (hi - lo) / (sizeof(int) + PAGE_SIZE); // number of pages in our coremap (accounting for the coremap)
+	
+	loAddr = hi - (totalPages * PAGE_SIZE); // the new start point; do i need to pad with 0's here?
+	
+
+	/*
+	loAddr = lo + ROUNDUP((sizeof(int*) * totalPages), PAGE_SIZE);
+	totalPages = (hi - loAddr) / PAGE_SIZE;
+	for (int i = 0; i < totalPages; i++) {
+		coremap[i] = 0; // not currently used
+	}
+	*/
+	spinlock_acquire(&stealmem_lock); // critical var
+	bootstrapDone = true; //bootstrap done
+	spinlock_release(&stealmem_lock);
+#endif
 }
+
+
+#if OPT_A3
+
+// check if the number of pages we're going for is available at the current frame
+bool validBlock(unsigned int index, unsigned long numPages) {
+	
+	for (unsigned int i = index; i < (index + numPages); i++) {
+		// occupied if != 0
+		if (coremap[i] != 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// occupies specified coremap pages
+void fillPages(unsigned int index, unsigned long numPages) {
+
+	int counter = 1;
+	for (unsigned int i = index; i < (index + numPages); i++) {
+		coremap[i] = counter;
+		counter++;
+	}
+}
+
+#endif
+
+
 
 static
 paddr_t
@@ -67,11 +125,35 @@ getppages(unsigned long npages)
 
 	spinlock_acquire(&stealmem_lock);
 
+#if OPT_A3
+	if (bootstrapDone) {
+		// use coremap
+
+		for (int i = 0; i < totalPages; i++) {
+			
+			if ((coremap[i] == 0) && validBlock(i, npages)) {
+				fillPages(i, npages);
+				addr = loAddr + (i * PAGE_SIZE); // return address
+				break;
+			}
+			// leslie said no malicious tests :)
+		}
+
+
+
+	}
+	else {
+		addr = ram_stealmem(npages); // coremap not implemented yet
+	}
+#else
 	addr = ram_stealmem(npages);
-	
+#endif
+
 	spinlock_release(&stealmem_lock);
 	return addr;
 }
+
+
 
 /* Allocate/free some kernel-space virtual pages */
 vaddr_t 
@@ -85,12 +167,40 @@ alloc_kpages(int npages)
 	return PADDR_TO_KVADDR(pa);
 }
 
+
 void 
 free_kpages(vaddr_t addr)
-{
-	/* nothing - leak the memory. */
+{	
+#if OPT_A3
 
+	// cant use core-map case
+	if (!bootstrapDone) {
+		return;
+	}
+
+	//spinlock_acquire(&stealmem_lock);
+	paddr_t pAddr = (addr - MIPS_KSEG0); // first convert to physical addr
+	// paddr_t alignedAddr = ROUND
+	int currFrame = (pAddr - loAddr) / PAGE_SIZE;
+
+	// we assume we will get the addr of the beggining of the FIRST frame page we want to free everytime
+	int counter = 1;
+	for (int i = currFrame; i < totalPages; i++) {
+		if (coremap[i] == counter) {
+			coremap[i] = 0;
+		}
+		else {
+			break; //block is freed
+		}
+		counter++;
+	}
+
+	//spinlock_release(&stealmem_lock);
+
+#else
+	/* nothing - leak the memory. */
 	(void)addr;
+#endif
 }
 
 void
@@ -271,7 +381,14 @@ as_create(void)
 
 void
 as_destroy(struct addrspace *as)
-{
+{	
+#if OPT_A3
+	
+	free_kpages(PADDR_TO_KVADDR(as->as_pbase1));
+	free_kpages(PADDR_TO_KVADDR(as->as_pbase2));
+	free_kpages(PADDR_TO_KVADDR(as->as_stackpbase));
+	
+#endif
 	kfree(as);
 }
 

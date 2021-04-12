@@ -124,3 +124,4 @@ ram_getsize(paddr_t *lo, paddr_t *hi)
 	*hi = lastpaddr;
 	firstpaddr = lastpaddr = 0;
 }
+

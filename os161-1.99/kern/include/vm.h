@@ -29,6 +29,7 @@
 
 #ifndef _VM_H_
 #define _VM_H_
+#include "opt-A3.h"
 
 /*
  * VM system-related definitions.
@@ -50,6 +51,11 @@ void vm_bootstrap(void);
 
 /* Fault handling function called by trap code */
 int vm_fault(int faulttype, vaddr_t faultaddress);
+
+#if OPT_A3
+bool validBlock(unsigned int index, unsigned long numPages);
+void fillPages(unsigned int index, unsigned long numPages);
+#endif
 
 /* Allocate/free kernel heap pages (called by kmalloc/kfree) */
 vaddr_t alloc_kpages(int npages);

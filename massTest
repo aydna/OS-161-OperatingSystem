@@ -7,13 +7,16 @@ fi
 
 test=$1
 cd ~/cs350-os161/root
-for i in {1..100}
+#sys161 kernel-ASST${1}
+for i in {1..25}
 do  
-    sys161 kernel-ASST${1} "p testbin/sty;q";done > ../testOut
+    #sys161 kernel-ASST${1} "p testbin/sort;q";done > ../testOut
+    "p testbin/sort" > ../testOut
     #n > testOut
     #echo "Run:" ${i} ${test}
     #echo ${test}\n"q"\n | ./run 2 > testOut
     #echo -e ${test}"\nq"
     #echo -e ${test}"\nq" | ./run 2
 done
+
 

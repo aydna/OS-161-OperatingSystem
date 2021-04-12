@@ -81,7 +81,7 @@ int runprogram(char *progname)
 	}
 
 	/* Switch to it and activate it. */
-	struct addrspace* oldAddressSpace = curproc_setas(as);
+	curproc_setas(as);
 	as_activate();
 
 	/* Load the executable. */
@@ -126,7 +126,7 @@ int runprogram(char *progname)
     	copyout((void*)&argAddresses[i], (userptr_t)currStackPtr, ptrSize); // write ptr addr of arg i onto stack
   	}
 	
-	as_destroy(oldAddressSpace);
+	//as_destroy(oldAddressSpace);
   
   	enter_new_process(numArgs, (userptr_t)currStackPtr, currStackPtr, entrypoint);
 
