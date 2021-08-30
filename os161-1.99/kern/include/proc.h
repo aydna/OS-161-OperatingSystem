@@ -38,6 +38,8 @@
 
 #include <spinlock.h>
 #include <thread.h> /* required for struct threadarray */
+#include <array.h>  // require for array structure
+#include "opt-A2.h" 
 
 struct addrspace;
 struct vnode;
@@ -68,7 +70,16 @@ struct proc {
   struct vnode *console;                /* a vnode for the console device */
 #endif
 
-	/* add more material here as needed */
+#if OPT_A2
+	pid_t pid; //pid of curproc
+	struct proc* parent; // pointer to parent process of this process
+	struct array* children; // array of all this process' children *maybe volatile*
+
+	struct lock* myLock; // actual lock
+	struct cv* myCv; // condition variable
+	bool isAlive; // signals whether the current process is alive
+	int exitCode; // holds the exit code for when sys_exit is called on curproc
+#endif
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
@@ -78,6 +89,11 @@ extern struct proc *kproc;
 #ifdef UW
 extern struct semaphore *no_proc_sem;
 #endif // UW
+
+#if OPT_A2
+volatile pid_t currPID; // Global providing unique PID to children
+struct lock *pid_lock;
+#endif
 
 /* Call once during system startup to allocate data structures. */
 void proc_bootstrap(void);

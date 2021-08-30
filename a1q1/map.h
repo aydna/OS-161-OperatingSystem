@@ -25,6 +25,7 @@
  * 2 occurences of the word "the".
  * --------------------------------------------------------------------
  */
+
 int CountOccurrences( struct  Library * lib, char * word );
 
 #endif

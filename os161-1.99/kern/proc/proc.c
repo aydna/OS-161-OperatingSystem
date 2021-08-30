@@ -49,8 +49,9 @@
 #include <vnode.h>
 #include <vfs.h>
 #include <synch.h>
-#include <kern/fcntl.h>  
+#include <kern/fcntl.h>
 
+#include "opt-A2.h" 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
@@ -69,6 +70,11 @@ static struct semaphore *proc_count_mutex;
 struct semaphore *no_proc_sem;   
 #endif  // UW
 
+#if OPT_A2
+volatile pid_t currPID = 0; // Global providing unique PID to children
+struct lock *pid_lock; // initialize lock for mutual exclusivity
+// where/when do we destroy this lock?
+#endif
 
 
 /*
@@ -103,6 +109,22 @@ proc_create(const char *name)
 	proc->console = NULL;
 #endif // UW
 
+#if OPT_A2
+	// assign a PID to child
+  	lock_acquire(pid_lock);
+  	currPID++;
+  	lock_release(pid_lock);
+	proc->pid = currPID;
+	
+	proc->parent = NULL; // we set parent in fork
+	proc->children = array_create(); // returns pointer to array structure for children
+
+	proc->myLock = lock_create("curproc's lock");
+	proc->myCv = cv_create("curproc's cv");
+	proc->isAlive = true; // curproc is alive indeed
+	proc->exitCode = -1; // exit hasn't been called on curproc yet
+#endif
+
 	return proc;
 }
 
@@ -136,6 +158,13 @@ proc_destroy(struct proc *proc)
 		proc->p_cwd = NULL;
 	}
 
+#if OPT_A2
+	// destroy stuff
+	proc->isAlive = false;
+	lock_destroy(proc->myLock);
+	cv_destroy(proc->myCv);
+	//array_destroy(proc->children); // will this break smth
+#endif
 
 #ifndef UW  // in the UW version, space destruction occurs in sys_exit, not here
 	if (proc->p_addrspace) {
@@ -193,10 +222,16 @@ proc_destroy(struct proc *proc)
 void
 proc_bootstrap(void)
 {
+
+#if OPT_A2
+  pid_lock = lock_create(""); //initialize
+#endif // A2
+
   kproc = proc_create("[kernel]");
   if (kproc == NULL) {
     panic("proc_create for kproc failed\n");
   }
+
 #ifdef UW
   proc_count = 0;
   proc_count_mutex = sem_create("proc_count_mutex",1);

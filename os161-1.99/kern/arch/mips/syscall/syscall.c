@@ -36,6 +36,7 @@
 #include <current.h>
 #include <syscall.h>
 
+#include "opt-A2.h" 
 
 /*
  * System call dispatcher.
@@ -109,6 +110,18 @@ syscall(struct trapframe *tf)
 				 (userptr_t)tf->tf_a1);
 		break;
 #ifdef UW
+
+#if OPT_A2
+	
+	case SYS_fork:
+		err = sys_fork(&retval, tf); // call sysfork
+		break;
+
+	case SYS_execv:
+		err = sys_execv((char*)tf->tf_a0, (char**)tf->tf_a1);
+	    /* Add stuff here */
+#endif /* OPT_A2 */
+
 	case SYS_write:
 	  err = sys_write((int)tf->tf_a0,
 			  (userptr_t)tf->tf_a1,
@@ -131,8 +144,6 @@ syscall(struct trapframe *tf)
 	  break;
 #endif // UW
 
-	    /* Add stuff here */
- 
 	default:
 	  kprintf("Unknown syscall %d\n", callno);
 	  err = ENOSYS;
@@ -176,8 +187,14 @@ syscall(struct trapframe *tf)
  *
  * Thus, you can trash it and do things another way if you prefer.
  */
+#if OPT_A2
 void
 enter_forked_process(struct trapframe *tf)
 {
-	(void)tf;
+	struct trapframe child_tf = *tf; // local trapframe
+	child_tf.tf_v0 = 0; // return code for child
+	child_tf.tf_a3 = 0; // no error
+	child_tf.tf_epc += 4; // increment pc counter
+	mips_usermode(&child_tf); // to enter mips user mode
 }
+#endif

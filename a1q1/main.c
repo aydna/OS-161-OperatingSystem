@@ -71,6 +71,7 @@ struct Article * GenerateArticle()
     }
     article->words = words;
     article->numWords = numWords;
+
     return article;
 }
 

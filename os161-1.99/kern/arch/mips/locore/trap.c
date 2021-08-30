@@ -40,6 +40,10 @@
 #include <mainbus.h>
 #include <syscall.h>
 
+#include <proc.h>
+#include <addrspace.h>
+#include "opt-A3.h"
+#include <syscall.h>
 
 /* in exception.S */
 extern void asm_usermode(struct trapframe *tf);
@@ -86,6 +90,9 @@ kill_curthread(vaddr_t epc, unsigned code, vaddr_t vaddr)
 		sig = SIGABRT;
 		break;
 	    case EX_MOD:
+	#if OPT_A3
+			sys__exit(SIGSEGV); // so it doesnt panic and crash
+	#endif
 	    case EX_TLBL:
 	    case EX_TLBS:
 		sig = SIGSEGV;
@@ -106,6 +113,7 @@ kill_curthread(vaddr_t epc, unsigned code, vaddr_t vaddr)
 	    case EX_OVF:
 		sig = SIGFPE;
 		break;
+
 	}
 
 	/*
